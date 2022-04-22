@@ -148,7 +148,53 @@ class CaptioningRNN:
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        ########## forward ###########
+        
+        # (1) compute initial hidden state
+        h0, cache_proj = affine_forward(features, W_proj, b_proj)
+        
+        # (2) embedding words of captions_in
+        x, cache_embed = word_embedding_forward(captions_in, W_embed)
+        
+        # (3) apply to RNN or LSTM
+        h_rnn = None
+        cache_rnn = None
+        if self.cell_type == "rnn":
+            h_rnn, cache_rnn = rnn_forward(x, h0, Wx, Wh, b)
+        elif self.cell_type == "lstm":
+            h_rnn, cache_rnn = lstm_forward(x, h0, Wx, Wh, b)
+        
+        # (4) use temporal affine compute scores
+        temp_aff_out, temp_aff_cache = temporal_affine_forward(h_rnn, W_vocab, b_vocab)
+        
+        # (5) compute loss
+        loss, dh = temporal_softmax_loss(temp_aff_out, captions_out, mask, verbose=False)
+        
+        ########## backward ###########
+        
+        # (1) temporal affine
+        dh_rnn, dW_vocab, db_vocab = temporal_affine_backward(dh, temp_aff_cache)
+        grads["W_vocab"] = dW_vocab
+        grads["b_vocab"] = db_vocab
+        
+        # (2) rnn
+        if self.cell_type == "rnn":
+            dx, dh0, dWx, dWh, db = rnn_backward(dh_rnn, cache_rnn)
+        elif self.cell_type == "lstm":
+            dx, dh0, dWx, dWh, db = lstm_backward(dh_rnn, cache_rnn)
+        grads["Wx"] = dWx
+        grads["Wh"] = dWh
+        grads["b"] = db
+        
+        # (3) embedding
+        dW_embed = word_embedding_backward(dx, cache_embed)
+        grads["W_embed"] = dW_embed
+        
+        # (4) proj affine
+        dfeatures, dW_proj, db_proj = affine_backward(dh0, cache_proj)
+        grads["W_proj"] = dW_proj
+        grads["b_proj"] = db_proj
+        
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -216,7 +262,25 @@ class CaptioningRNN:
         ###########################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        T = max_length
+        # init word
+        prev_word = self._start * np.ones((N, 1), dtype=np.int32)
+        # init hidden state
+        ht, _ = affine_forward(features, W_proj, b_proj)
+        ct = np.zeros(ht.shape)
+        for t in range(T):
+            # compute embedding
+            embedding, _ = word_embedding_forward(prev_word, W_embed)
+            # apply to rnn step
+            if self.cell_type == "rnn":
+                ht, _ = rnn_step_forward(embedding.reshape(N,-1), ht, Wx, Wh, b)
+            elif self.cell_type == "lstm":
+                ht, ct, _ = lstm_step_forward(embedding.reshape(N,-1), ht, ct, Wx, Wh, b)
+            # compute step output
+            yt, _ = temporal_affine_forward(ht.reshape(N,1,-1), W_vocab, b_vocab)
+            # select word
+            captions[:,t] = yt.argmax(axis = 2).reshape(N)
+            prev_word = captions[:,t]
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
