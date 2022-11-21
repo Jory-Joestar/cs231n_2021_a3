@@ -34,7 +34,19 @@ def compute_saliency_maps(X, y, model):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    # (1) 先进行前向传播计算各类别的得分
+    scores = model(X) # of shape (N,C)
+    # (2) 选择正确的分类得分来反向传播
+    correct_class_scores = scores.gather(1,y.view(-1,1)).squeeze() # of shape (N,)
+    # (3) 正确分类反向传播,求图像上每个点对该类别的梯度
+    #  def backward(self, gradient=None, retain_graph=None, create_graph=False)
+    #  gradient: 形状与tensor一致，可以理解为链式求导的中间结果，若tensor标量，可以省略（默认为1）
+    #  这里，我们的输出是向量,所以我们初始化一个上流梯度向量
+    correct_class_scores.backward(torch.FloatTensor([1.0,1.0,1.0,1.0,1.0]))
+    # (4) 对通道求最值
+    saliency = X.grad.data # (N,3,H,W)
+    saliency = saliency.abs()
+    saliency,index = torch.max(saliency,dim=1)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -76,7 +88,19 @@ def make_fooling_image(X, target_y, model):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    iter = 100
+    for i in range(iter):
+        scores = model(X_fooling)
+        _,predictions = scores.max(1)
+        if predictions == target_y: break
+        
+        target_scores = scores[0,target_y].reshape(1)
+        target_scores.backward(torch.FloatTensor([1.0]))
+        image_grad = X_fooling.grad
+        
+        with torch.no_grad():
+            X_fooling += learning_rate * (image_grad / image_grad.norm())
+            X_fooling.grad.zero_()
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -94,7 +118,15 @@ def class_visualization_update_step(img, model, target_y, l2_reg, learning_rate)
     ########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    scores = model(img)
+    # 需要的类别分数 (N,), 这里是 (1,)
+    predictions = scores[0,target_y]
+    loss = predictions - l2_reg * torch.sum(img * img)
+    loss.backward()
+    with torch.no_grad():
+        # 除以范数类似于Adam优化算法中平衡各方向的梯度
+        img += learning_rate * img.grad / img.grad.norm()
+        img.grad.zero_()
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ########################################################################

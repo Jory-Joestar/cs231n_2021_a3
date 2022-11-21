@@ -30,7 +30,8 @@ def sample_noise(batch_size, dim, seed=None):
 
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    output = (torch.rand((batch_size, dim)) - 0.5) * 2
+    return output
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
@@ -51,7 +52,13 @@ def discriminator(seed=None):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    model = nn.Sequential(
+        nn.Linear(784, 256),
+        nn.LeakyReLU(0.01),
+        nn.Linear(256, 256),
+        nn.LeakyReLU(0.01),
+        nn.Linear(256, 1),
+    )
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -76,7 +83,14 @@ def generator(noise_dim=NOISE_DIM, seed=None):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    model = nn.Sequential(
+        nn.Linear(noise_dim, 1024),
+        nn.ReLU(),
+        nn.Linear(1024, 1024),
+        nn.ReLU(),
+        nn.Linear(1024, 784),
+        nn.Tanh(),
+    )
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -117,7 +131,13 @@ def discriminator_loss(logits_real, logits_fake):
     loss = None
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    real_size = logits_real.shape[0]
+    fake_size = logits_fake.shape[0]
+    
+    real_labels = torch.ones(real_size).type(dtype)
+    fake_labels = torch.zeros(fake_size).type(dtype)
+    
+    loss = bce_loss(logits_real, real_labels) + bce_loss(logits_fake, fake_labels)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     return loss
@@ -135,7 +155,9 @@ def generator_loss(logits_fake):
     loss = None
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    fake_size = logits_fake.shape[0]
+    fake_labels = torch.ones(fake_size).type(dtype)
+    loss = bce_loss(logits_fake, fake_labels)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     return loss
@@ -154,7 +176,7 @@ def get_optimizer(model):
     optimizer = None
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    optimizer = optim.Adam(model.parameters(),lr=1e-3,betas=(0.5, 0.999))
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     return optimizer
@@ -172,8 +194,8 @@ def ls_discriminator_loss(scores_real, scores_fake):
     """
     loss = None
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    pass
+    
+    loss = 0.5 * torch.mean(torch.square(scores_real - 1)) + 0.5 * torch.mean(torch.square(scores_fake))
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     return loss
@@ -191,7 +213,7 @@ def ls_generator_loss(scores_fake):
     loss = None
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    loss = 0.5 * torch.mean(torch.square(scores_fake - 1))
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     return loss
@@ -209,7 +231,21 @@ def build_dc_classifier(batch_size):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    model = nn.Sequential(
+        Unflatten(batch_size,1,28,28),
+        nn.Conv2d(in_channels=1,out_channels=32,kernel_size=(5,5),stride=1),
+        nn.LeakyReLU(0.01),
+        nn.MaxPool2d(kernel_size=(2,2),stride=2),
+        nn.Conv2d(in_channels=32,out_channels=64,kernel_size=(5,5),stride=1),
+        nn.LeakyReLU(0.01),
+        nn.MaxPool2d(kernel_size=(2,2),stride=2),
+        Flatten(),
+        nn.Linear(4*4*64, 4*4*64),
+        nn.LeakyReLU(0.01),
+        nn.Linear(1024, 1),
+    )
+    
+    return model
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -230,7 +266,22 @@ def build_dc_generator(noise_dim=NOISE_DIM):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    model = nn.Sequential(
+        nn.Linear(noise_dim, 1024),
+        nn.ReLU(),
+        nn.BatchNorm1d(num_features=1024),
+        nn.Linear(1024, 7*7*128),
+        nn.ReLU(),
+        nn.BatchNorm1d(num_features=7*7*128),
+        Unflatten(C=128, H=7, W=7),
+        nn.ConvTranspose2d(in_channels=128,out_channels=64,kernel_size=(4,4),stride=2,padding=1),
+        nn.ReLU(),
+        nn.BatchNorm2d(num_features=64),
+        nn.ConvTranspose2d(in_channels=64,out_channels=1,kernel_size=(4,4),stride=2,padding=1),
+        nn.Tanh(),
+    )
+    
+    return model
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -261,11 +312,13 @@ def run_a_gan(D, G, D_solver, G_solver, discriminator_loss, generator_loss, load
                 continue
             D_solver.zero_grad()
             real_data = x.type(dtype)
+            real_data = real_data.view(real_data.shape[0],-1)
             logits_real = D(2* (real_data - 0.5)).type(dtype)
 
             g_fake_seed = sample_noise(batch_size, noise_size).type(dtype)
             fake_images = G(g_fake_seed).detach()
-            logits_fake = D(fake_images.view(batch_size, 1, 28, 28))
+            # logits_fake = D(fake_images.view(batch_size, 1, 28, 28))
+            logits_fake = D(fake_images.view(batch_size, -1))
 
             d_total_error = discriminator_loss(logits_real, logits_fake)
             d_total_error.backward()
@@ -275,7 +328,8 @@ def run_a_gan(D, G, D_solver, G_solver, discriminator_loss, generator_loss, load
             g_fake_seed = sample_noise(batch_size, noise_size).type(dtype)
             fake_images = G(g_fake_seed)
 
-            gen_logits_fake = D(fake_images.view(batch_size, 1, 28, 28))
+            # gen_logits_fake = D(fake_images.view(batch_size, 1, 28, 28))
+            gen_logits_fake = D(fake_images.view(batch_size, -1))
             g_error = generator_loss(gen_logits_fake)
             g_error.backward()
             G_solver.step()
